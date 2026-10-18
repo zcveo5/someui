@@ -1,4 +1,6 @@
 import operator
+import platform
+
 import glfw
 import skia
 from .abstract import AbstractWindow
@@ -24,12 +26,19 @@ class GLFWWindow(AbstractWindow):
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 2)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_COMPAT_PROFILE)
+
+        # Профиль зависит от ОС: на macOS только Core, на Windows/Linux можно Compat
+        if platform.system() == 'Darwin':
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+            glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)  # Обязательно для Core Profile на Mac
+        else:
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_COMPAT_PROFILE)
 
         glfw.window_hint(glfw.STENCIL_BITS, 8)
         glfw.window_hint(glfw.DEPTH_BITS, 24)
 
         self._window = window = glfw.create_window(width, height, title, None, None)
+
         if not self._window:
             glfw.terminate()
             raise RuntimeError()

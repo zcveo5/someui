@@ -297,4 +297,9 @@ class ScrollItemWidget(RelativePlaceWidget):
 
 
 class Container(ScrollContainerWidget):
-    pass
+    def __init__(self, parent, bg='#00000000'):
+        super().__init__(parent)
+        self.bg_paint = skia.Paint(hex_str_to_int(bg))
+
+    def draw_self(self, ctx: skia.Canvas):
+        ctx.drawRect(self.skia_rect, self.bg_paint)
