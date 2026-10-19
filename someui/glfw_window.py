@@ -15,6 +15,7 @@ def _ignore_first(fnc):
 
 
 class GLFWWindow(AbstractWindow):
+    """Window implementation based on GLFW"""
     _glfws = []
 
     def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', frameless=False):
@@ -26,6 +27,9 @@ class GLFWWindow(AbstractWindow):
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 2)
+
+        if frameless:
+            glfw.window_hint(glfw.DECORATED, False)
 
         # Профиль зависит от ОС: на macOS только Core, на Windows/Linux можно Compat
         if platform.system() == 'Darwin':
@@ -63,6 +67,8 @@ class GLFWWindow(AbstractWindow):
         def _on_cursor_exit(wnd, entered):
             if not entered:
                 self.on_mouse_exit.process()
+            else:
+                self.on_mouse_enter.process()
 
         glfw.set_cursor_enter_callback(self._window, _on_cursor_exit)
 

@@ -189,6 +189,7 @@ def ignore_params(fnc):
 
 
 class RelativePlaceWidget(widget.Widget):
+    """Adds relative place interface to a widget"""
     def __init__(self, parent):
         super().__init__(parent)
         self.actual_x = 0

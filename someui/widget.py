@@ -25,6 +25,7 @@ class Event:
 
 
 class Widget:
+    """Base widget class"""
     widget_type = 'Widget'
 
     window: tc_window.AbstractWindow

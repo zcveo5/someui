@@ -33,6 +33,7 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.scale_mod = 1.0
 
         self.on_mouse_exit = widget.Event()
+        self.on_mouse_enter = widget.Event()
         self.on_resize.process(width, height)
 
         self.windows.append(self)
@@ -163,6 +164,11 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
     def dispatch_click(self, button: int, action: int, mods: int):
         x, y = self.mouse_x, self.mouse_y
+
+        if action == 1:
+            self.on_mouse_press.process(button, x, y)
+        else:
+            self.on_mouse_release.process(button, x, y)
 
         for _child in reversed(self.flat_children):
             if not _child.enabled:
