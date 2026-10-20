@@ -72,6 +72,8 @@ class AbstractWindow(widget.Widget, abc.ABC):
     def destroy(self):
         if self in self.windows:
             self.windows.remove(self)
+        if self in _loop.windows:
+            _loop.windows.remove(self)
         self.is_running = False
         _loop.wakeup()
 

@@ -35,7 +35,7 @@ def call_threadsafe(fnc, *args, **kwargs):
     wakeup_mainloop()
 
 
-def mainloop(*windows):
+def mainloop(windows):
     global _call_at
 
     for window in windows:
@@ -45,6 +45,7 @@ def mainloop(*windows):
         timeBeginPeriod(1)
 
         while windows:
+
             while not _call_queue.empty():
                 fnc, args, kwargs = _call_queue.get()
                 fnc(*args, **kwargs)

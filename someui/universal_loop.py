@@ -26,7 +26,7 @@ if sys.platform == 'win32':
 
     class _W32Loop(AbstractWindowLoop):
         def run(self):
-            mainloop(*self.windows)
+            mainloop(self.windows)
 
         def call_at(self, fnc, ts):
             call_at(fnc, ts)
@@ -41,7 +41,7 @@ elif sys.platform == 'darwin':
 
     class _MacLoop(AbstractWindowLoop):
         def run(self):
-            mainloop(*self.windows)
+            mainloop(self.windows)
 
         def call_at(self, fnc, ts):
             call_at(fnc, ts)

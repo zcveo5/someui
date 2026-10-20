@@ -56,6 +56,7 @@ class Label(ScrollItemWidget):
         self._text_x_offset_pending = x_offset
         self._text_y_offset_pending = y_offset
         self._blob_dirty = True
+        self.invalidate()
 
     def _rebuild_blob(self):
         if self._text.strip():
@@ -81,7 +82,7 @@ class Label(ScrollItemWidget):
 
     @property
     def text_metrics(self):
-        return self._text_width, self._text_height
+        return self._text_width + 12, self._text_height + 6
 
     def draw_self(self, ctx: skia.Canvas):
         ctx.save()
@@ -95,24 +96,43 @@ class Label(ScrollItemWidget):
 
 
 class Button(Label):
-    def __init__(self, parent, text = '', command=None, font: str = 'Inter', font_size: float = 14, typeface: skia.Typeface | None = None, text_color: str = 'white', background_color: str = '#888'):
+    def __init__(self, parent, text = '', command=None, font: str = 'Inter', font_size: float = 14, typeface: skia.Typeface | None = None, text_color: str = '#fff', background_color: str = '#888', click_color='#444', hover_color='#666'):
         super().__init__(parent, text, font, font_size, typeface, text_color, background_color)
+
+        self.bg_color = background_color
+        self.click_color = click_color
+        self.hover_color = hover_color
+
+        self._last_color = background_color
+
         if not self.bg_paint:
             raise ValueError(self.bg_paint)
         self.bg_paint.setAntiAlias(True)
         self.on_mouse_release(self._command_wrapper)
+        self.on_mouse_press(lambda *_: self._set_color())
+        self.on_hover_enter(lambda *_: self._set_color())
+        self.on_hover_exit(lambda *_: self._set_color())
         self.command = command
 
-        self.debug = skia.Paint(hex_str_to_int('#ff0000'))
+    def _set_color(self):
+        if self.held:
+            clr = self.click_color
+        elif self.hovered:
+            clr = self.hover_color
+        else:
+            clr = self.bg_color
+
+        if clr != self._last_color:
+            self.bg_paint.setColor(hex_str_to_int(clr))
+            self._last_color = clr
 
     def _command_wrapper(self, btn, x, y):
-        print(btn, x, y)
-        if btn == 1 and self.command is not None:
+        if btn == 0 and self.command is not None:
             self.command()
+            self._set_color()
 
     def draw_self(self, ctx: skia.Canvas):
         ctx.save()
-        ctx.drawRect(self.skia_rect, self.debug)
         ctx.translate(self.global_x, self.global_y)
         ctx.drawRRect(skia.RRect(self.bg_rect, 5, 5), self.bg_paint)
         self._ensure_blob()

@@ -78,7 +78,7 @@ NSApp = libobjc.objc_msgSend(NSApp_cls, NSApplication_sharedApplication)
 # Посылаем фиктивное событие в очередь приложения для пробуждения
 # (Альтернатива: NSApp postEvent:atStart:)
 
-def mainloop(*windows):
+def mainloop(windows):
     global _call_at
 
     for window in windows:

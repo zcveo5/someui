@@ -77,10 +77,6 @@ class Widget:
 
         self.held = False
 
-    @property
-    def is_hold(self):
-        return self.held
-
     def cord_to_local(self, gx, gy):
         return gx - self.global_x, gy - self.global_y
 

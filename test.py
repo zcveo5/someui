@@ -5,13 +5,16 @@ from someui.text_widgets import Label, Button
 from someui.widget_extensions import Container
 
 root = GLFWWindow()
-root.scale_mod = 2.0
+root.scale_mod = 1.0
 
 inf_fmt = 'cursor at: {}, {}'
 
-lbl_cursor = Label(root, '')
+lbl_cursor = Label(root, '!')
 lbl_cursor.set_size(*lbl_cursor.text_metrics)
-lbl_click = Label(root, '')
+
+print(lbl_cursor.global_y1, lbl_cursor.height)
+
+lbl_click = Label(root, '!')
 lbl_click.set_position(0, lbl_cursor.global_y1)
 lbl_click.set_size(*lbl_click.text_metrics)
 
@@ -28,9 +31,26 @@ last_mouse_x, last_mouse_y = 0, 0
 last_event_time = time.time()
 smoothed_velocity = 0.0
 
+def change_size(a):
+    def _w():
+        root.scale_mod += a
+    return _w
+
+plus = Button(root, '+ Size', change_size(0.1))
+plus.set_size(*plus.text_metrics)
+plus.set_position(0, lbl_click.global_y1)
+
+subs = Button(root, '- Size', change_size(-0.1))
+subs.set_size(*plus.text_metrics)
+subs.set_position(plus.global_x1, lbl_click.global_y1)
+
 @root.on_mouse_press
 def press(button, x, y):
-    lbl
+    lbl_click.set_text(f'Press: {button} {x} {y}')
+
+@root.on_mouse_release
+def press(button, x, y):
+    lbl_click.set_text(f'Release: {button} {x} {y}')
 
 @root.on_mouse_exit
 def exit_mouse(*args):
