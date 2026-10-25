@@ -272,18 +272,27 @@ class RelativePlaceWidget(widget.Widget):
 class ScrollContainerWidget(RelativePlaceWidget):
     def __init__(self, parent):
         super().__init__(parent)
-        self.scroll_x = 0.0
-        self.scroll_y = 0.0
-        self.on_scroll(self._scroll)
-        self.on_scroll(self._h_scroll)
+        self.scroll_enabled = True
+        self.on_scroll(self._v_scroll)
+        #self.on_horizontal_scroll(self._h_scroll)
+
+    def _scroll(self, delta_x, delta_y):
+        new_x = self.scroll_x + delta_x
+        new_y = self.scroll_y + delta_y
+
+        if 0 <= new_x < self.width:
+            self.scroll_x = new_x
+
+        if 0 <= new_y < self.height:
+            self.scroll_y = new_y
+
+        self.invalidate()
 
     def _h_scroll(self, delta, x, y):
-        self.scroll_x += delta
-        self.invalidate()
+        self._scroll(delta, 0)
 
-    def _scroll(self, delta, x, y):
-        self.scroll_y += delta
-        self.invalidate()
+    def _v_scroll(self, delta, x, y):
+        self._scroll(0, delta)
 
 
 class ScrollItemWidget(RelativePlaceWidget):
@@ -303,4 +312,4 @@ class Container(ScrollContainerWidget):
         self.bg_paint = skia.Paint(hex_str_to_int(bg))
 
     def draw_self(self, ctx: skia.Canvas):
-        ctx.drawRect(self.skia_rect, self.bg_paint)
+        ctx.drawRect(skia.Rect(0, 0, self.width, self.height), self.bg_paint)

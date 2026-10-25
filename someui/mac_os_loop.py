@@ -87,6 +87,8 @@ def mainloop(windows):
     # Получаем ссылку на sharedApplication и текущий RunLoop
     NSApp = libobjc.objc_msgSend(NSApp_cls, NSApplication_sharedApplication)
     loop = libobjc.objc_msgSend(NSRunLoop_cls, currentRunLoop_sel)
+    NSDate_cls = libobjc.objc_getClass('NSDate')
+    dateWithTimeInterval_sel = sel('dateWithTimeIntervalSinceNow:')
 
     while windows:
         # 1. Обработка потокобезопасной очереди
@@ -129,8 +131,6 @@ def mainloop(windows):
         # 4. Нативный шаг цикла macOS (замена MsgWaitForMultipleObjectsEx)
         # Вызываем runMode:beforeDate: для обработки одного события или истечения таймера min_after
         # NSDate *date = [NSDate dateWithTimeIntervalSinceNow:min_after];
-        NSDate_cls = libobjc.objc_getClass('NSDate')
-        dateWithTimeInterval_sel = sel('dateWithTimeIntervalSinceNow:')
         libobjc.objc_msgSend.restype = ctypes.c_void_p
         later_date = libobjc.objc_msgSend(NSDate_cls, dateWithTimeInterval_sel, ctypes.c_double(min_after))
 

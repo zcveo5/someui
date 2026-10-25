@@ -159,6 +159,7 @@ class AbstractWindow(widget.Widget, abc.ABC):
             if not _child.enabled or not _child.scroll_enabled:
                 continue
             if _child.hittest(x, y):
+                print(_child, delta_x, delta_y)
                 if delta_x:
                     _child.on_horizontal_scroll.process(delta_x, x, y)
                 if delta_y:

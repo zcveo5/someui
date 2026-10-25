@@ -18,7 +18,7 @@ class AbstractWindowLoop(abc.ABC):
     def wakeup(self):
         pass
 
-NativeLoop: AbstractWindowLoop | None = None
+NativeLoop: type[AbstractWindowLoop] | None = None
 
 
 if sys.platform == 'win32':

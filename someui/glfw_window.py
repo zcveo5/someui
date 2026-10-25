@@ -35,6 +35,7 @@ class GLFWWindow(AbstractWindow):
         if platform.system() == 'Darwin':
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)  # Обязательно для Core Profile на Mac
+            self.scale_mod = 2.0
         else:
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_COMPAT_PROFILE)
 

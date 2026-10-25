@@ -36,6 +36,7 @@ class Widget:
 
     def __init__(self, parent: Widget | None):
         self.enabled = True
+        self.hidden = False
         self.id = Widget.last_id
         Widget.last_id += 1
 
@@ -54,6 +55,8 @@ class Widget:
         self._width = 0
         self._height = 0
 
+        self.scroll_x = self.scroll_y = 0
+
         self.on_mouse_press = Event()
         self.on_mouse_release = Event()
         self.on_hover = Event()
@@ -67,7 +70,8 @@ class Widget:
         self.on_repos = Event()
 
         self.hovered = False
-
+        self.managed_by = None
+        self._is_fast_pack = False
         self.dirty = False
 
         if self.parent:
@@ -79,6 +83,24 @@ class Widget:
 
     def cord_to_local(self, gx, gy):
         return gx - self.global_x, gy - self.global_y
+
+    def get_size_hint(self):
+        return 0, 0
+
+    def arrange_fp(self):
+        y = 0
+        for i in self.children.values():
+            i.set_position(0, y)
+            y += i.height
+
+    def fast_pack(self):
+        if self.parent.managed_by is not None:
+            raise ValueError(f'Parent already managed by {self.parent.managed_by}')
+
+        self.parent.arrange_fp()
+
+        self._is_fast_pack = True
+        self.set_size(*self.get_size_hint())
 
     ###
 
@@ -102,10 +124,6 @@ class Widget:
         return self._get_metrics()[3]
 
     ###
-
-    @property
-    def skia_rect(self) -> skia.Rect:
-        return skia.Rect(self.global_x, self.global_y, self.global_x1, self.global_y1)
 
     @property
     def x1(self):
@@ -173,15 +191,23 @@ class Widget:
         pass
 
     def draw_children(self, ctx: skia.Canvas):
-        for _c in sorted(self.children.values(), key=_get_z_attr, reverse=True):
-            _c.draw(ctx)
+        ctx.save()
+        ctx.translate(-self.scroll_x, -self.scroll_y)  # у обычного виджета скролла нет, сдвиг 0
+        for c in self.children.values():
+            if not c.hidden and c.width > 0 and c.height > 0:
+                c.draw(ctx)
+        ctx.restore()
 
     def draw_self(self, ctx: skia.Canvas):
         pass
 
-    def draw(self, ctx: skia.Canvas):
+    def draw(self, ctx):
+        ctx.save()
+        ctx.translate(self.x, self.y)
+        ctx.clipRect(skia.Rect(0, 0, self.width, self.height), skia.ClipOp.kIntersect, True)
         self.draw_self(ctx)
         self.draw_children(ctx)
+        ctx.restore()
 
     def __repr__(self):
         return f'<{self.widget_type} id={self.id}>'
