@@ -15,6 +15,10 @@ class AbstractWindowLoop(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def call(self, fnc, *args, **kwargs):
+        pass
+
+    @abc.abstractmethod
     def wakeup(self):
         pass
 
@@ -22,7 +26,7 @@ NativeLoop: type[AbstractWindowLoop] | None = None
 
 
 if sys.platform == 'win32':
-    from someui.win32loop import mainloop, wakeup_mainloop, call_at
+    from someui.win32loop import mainloop, wakeup_mainloop, call_at, call
 
     class _W32Loop(AbstractWindowLoop):
         def run(self):
@@ -31,13 +35,16 @@ if sys.platform == 'win32':
         def call_at(self, fnc, ts):
             call_at(fnc, ts)
 
+        def call(self, fnc, *args, **kwargs):
+            call(fnc, *args, **kwargs)
+
         def wakeup(self):
             wakeup_mainloop()
 
     NativeLoop = _W32Loop
 
 elif sys.platform == 'darwin':
-    from someui.mac_os_loop import mainloop, wakeup_mainloop, call_at
+    from someui.mac_os_loop import mainloop, wakeup_mainloop, call_at, call
 
     class _MacLoop(AbstractWindowLoop):
         def run(self):
@@ -45,6 +52,9 @@ elif sys.platform == 'darwin':
 
         def call_at(self, fnc, ts):
             call_at(fnc, ts)
+
+        def call(self, fnc, *args, **kwargs):
+            call(fnc, *args, **kwargs)
 
         def wakeup(self):
             wakeup_mainloop()

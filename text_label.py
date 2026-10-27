@@ -4,7 +4,10 @@ from someui.text_widgets import Label, Button
 
 root = GLFWWindow()
 
-btn = Button(root, 'Test', None, debug=True)
-btn.set_size(*btn.text_metrics)
+def ext():
+    btn.set_text(f'[{btn.text}]')
+
+btn = Button(root, 'Test', ext, debug=True)
+btn.place(y='auto')
 
 root.mainloop()

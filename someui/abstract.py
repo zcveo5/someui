@@ -14,6 +14,10 @@ _loop: AbstractWindowLoop = NativeLoop([])
 _get_z_attr = operator.attrgetter('z')
 
 
+def get_loop() -> AbstractWindowLoop:
+    return _loop
+
+
 class AbstractWindow(widget.Widget, abc.ABC):
     windows: list[AbstractWindow] = []
 
@@ -26,6 +30,7 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.is_running = True
         self.flat_children: list[widget.Widget] = []
         self.children_rebuild = False
+        self.scene_rebuild = False
 
         self.mouse_x, self.mouse_y = 0, 0
         self.window_background = 0x0
@@ -34,6 +39,9 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
         self.on_mouse_exit = widget.Event()
         self.on_mouse_enter = widget.Event()
+        self.on_keyboard_press = widget.Event() # Press
+        self.on_keyboard_release = widget.Event() # Release
+        self.on_keyboard_write = widget.Event() # Press & Repeat
         self.on_resize.process(width, height)
 
         self.windows.append(self)
@@ -55,13 +63,13 @@ class AbstractWindow(widget.Widget, abc.ABC):
     def set_title(self, title: str): ...
 
     @abc.abstractmethod
-    def get_native_handle(self) -> int | None: ...
-
-    @abc.abstractmethod
     def swap_buffers(self): ...
 
     @abc.abstractmethod
     def get_canvas(self) -> skia.Canvas: ...
+
+    @abc.abstractmethod
+    def get_surface(self) -> skia.Surfaces: ...
 
     @abc.abstractmethod
     def pool(self): ...
@@ -85,6 +93,10 @@ class AbstractWindow(widget.Widget, abc.ABC):
         super().add_child(child)
         self.invalidate_children()
 
+    def invalidate_place(self):
+        self.scene_rebuild = True
+        _loop.wakeup()
+
     def invalidate_children(self):
         self.children_rebuild = True
         _loop.wakeup()
@@ -96,17 +108,88 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
         while stack:
             _child = stack.pop()
-            _flat.append(_child)
-            if _child.children:
-                stack.extend(reversed([i for i in _child.children.values() if i.enabled]))
+            if _child.enabled:
+                _flat.append(_child)
+                if _child.children:
+                    stack.extend(reversed([i for i in _child.children.values() if i.enabled]))
 
         _flat.sort(key=_get_z_attr)
         self.flat_children = _flat
 
+    def rebuild_scene(self):
+        self.scene_rebuild = False
+
+        def build_widget(wdg: widget.Widget):
+            base_w, base_h = wdg.width, wdg.height  # размер родителя — база для relative
+            auto_y = 0
+            max_w = 0
+            deferred = []
+
+            for c in wdg.iter_children():
+                #if not c.enabled:
+                #    continue
+
+                # propagate-виджет: сначала раскладываем его внутренности (снизу вверх),
+                # его размер станет известен после этого
+                if c.mcfg.propagate:
+                    build_widget(c)
+
+                cfg = c.pcfg
+                hint_w, hint_h = c.get_size_hint()
+                if c.mcfg.propagate:
+                    hint_w, hint_h = c.width, c.height
+
+                tx = cfg.x if cfg.x is not None else 0
+                if cfg.y == 'auto':
+                    ty = auto_y
+                else:
+                    ty = cfg.y if cfg.y is not None else 0
+
+                if cfg.width is not None:
+                    tw = cfg.width
+                elif cfg.relative_width is not None:
+                    tw = base_w * cfg.relative_width
+                else:
+                    tw = hint_w
+
+                if cfg.height is not None:
+                    th = cfg.height
+                elif cfg.relative_height is not None:
+                    th = base_h * cfg.relative_height
+                else:
+                    th = hint_h
+
+                if cfg.relative_x is not None:
+                    tx = base_w * cfg.relative_x
+                if cfg.relative_y is not None:
+                    ty = base_h * cfg.relative_y
+
+                if cfg.y == 'auto':
+                    auto_y += th
+                max_w = max(max_w, tx + tw)
+
+                c.set_position(tx, ty)
+                c.set_size(tw, th)
+                deferred.append(c)
+
+            # теперь размер каждого ребёнка известен — идём вглубь
+            for c in deferred:
+                if not c.mcfg.propagate:  # propagate уже обработан выше
+                    build_widget(c)
+
+            if wdg.mcfg.propagate:
+                wdg.set_size(max_w, min(auto_y, wdg.parent.height))
+
+        build_widget(self)
+
+
     def render(self, ctx):
         ctx.save()
         ctx.scale(self.scale_mod, self.scale_mod)
-        self.draw_children(ctx)
+
+        for i in self.flat_children:
+            i.draw(ctx)
+
         ctx.restore()
 
     def update(self):
@@ -159,7 +242,6 @@ class AbstractWindow(widget.Widget, abc.ABC):
             if not _child.enabled or not _child.scroll_enabled:
                 continue
             if _child.hittest(x, y):
-                print(_child, delta_x, delta_y)
                 if delta_x:
                     _child.on_horizontal_scroll.process(delta_x, x, y)
                 if delta_y:

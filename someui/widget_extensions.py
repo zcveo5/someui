@@ -1,3 +1,6 @@
+import math
+import time
+
 from . import widget
 import skia
 
@@ -176,6 +179,8 @@ def hex_str_to_int(clr_string: str, fmt: str = 'argb') -> int:
         final_hex = a + r + g + b
     elif fmt == 'rgba':
         final_hex = r + g + b + a
+    elif fmt == 'argb-a':
+        final_hex = 'ff' + r + g + b
     else:
         raise ValueError(f"Неподдерживаемый формат: {fmt}")
 
@@ -220,11 +225,11 @@ class RelativePlaceWidget(widget.Widget):
         else:
             self.actual_y = self._y
         if self.rel_w:
-            self.actual_width = self.parent.width * (self.rel_w - self.rel_x)
+            self.actual_width = self.parent.width * self.rel_w
         else:
             self.actual_width = self._width
         if self.rel_h:
-            self.actual_height = self.parent.height * (self.rel_h - self.rel_y)
+            self.actual_height = self.parent.height * self.rel_h
         else:
             self.actual_height = self._height
 
@@ -232,6 +237,8 @@ class RelativePlaceWidget(widget.Widget):
         self.actual_y += self.y_offset
         self.actual_width += self.w_offset
         self.actual_height += self.h_offset
+
+        self.on_resize.process(self.actual_width, self.actual_height)
 
         self.invalidate()
 
@@ -269,30 +276,60 @@ class RelativePlaceWidget(widget.Widget):
         return self.actual_x, self.actual_y, self.actual_width, self.actual_height
 
 
+def smooth_damp(current, target, vel, smooth_time, dt):
+    omega = 2.0 / smooth_time
+    x = omega * dt
+    e = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x)
+    change = current - target
+    temp = (vel + omega * change) * dt
+    vel = (vel - omega * temp) * e
+    out = target + (change + temp) * e
+    if (target - current > 0) == (out > target):   # защита от перелёта
+        out, vel = target, 0.0
+    return out, vel
+
+
 class ScrollContainerWidget(RelativePlaceWidget):
+    SMOOTH_TIME = 0.12   # сек; больше = мягче и медленнее
+
     def __init__(self, parent):
         super().__init__(parent)
         self.scroll_enabled = True
         self.on_scroll(self._v_scroll)
-        #self.on_horizontal_scroll(self._h_scroll)
+        self._target_scroll_y = 0.0
+        self._vel_y = 0.0
+        self._loop_running = False
+        self._last_t = 0.0
 
-    def _scroll(self, delta_x, delta_y):
-        new_x = self.scroll_x + delta_x
-        new_y = self.scroll_y + delta_y
+    def _clamp_y(self, value):
+        ch = sum(i.height for i in self.iter_children()) - self.height
+        print(0, value, ch)
+        return max(0, min(value, ch))   # сюда твои границы
 
-        if 0 <= new_x < self.width:
-            self.scroll_x = new_x
+    def _loop(self):
+        now = time.perf_counter()
+        dt = min(now - self._last_t, 0.05)
 
-        if 0 <= new_y < self.height:
-            self.scroll_y = new_y
+        self._last_t = now
 
+        self.scroll_y, self._vel_y = smooth_damp(
+            self.scroll_y, self._target_scroll_y, self._vel_y, self.SMOOTH_TIME, dt)
+
+        if abs(self._target_scroll_y - self.scroll_y) < 0.3 and abs(self._vel_y) < 1.0:
+            self.scroll_y = self._target_scroll_y
+            self._vel_y = 0.0
+            self._loop_running = False
+        else:
+            self.window.call_after(self._loop, 1 / 180)
         self.invalidate()
 
-    def _h_scroll(self, delta, x, y):
-        self._scroll(delta, 0)
-
     def _v_scroll(self, delta, x, y):
-        self._scroll(0, delta)
+        self._target_scroll_y = self._clamp_y(self._target_scroll_y - delta)
+
+        if not self._loop_running:
+            self._loop_running = True
+            self._last_t = time.perf_counter()
+            self.window.call_after(self._loop, 1 / 180)   # первый шаг не синхронно
 
 
 class ScrollItemWidget(RelativePlaceWidget):
@@ -307,9 +344,58 @@ class ScrollItemWidget(RelativePlaceWidget):
 
 
 class Container(ScrollContainerWidget):
-    def __init__(self, parent, bg='#00000000'):
+    def __init__(self, parent, bg: str | None = '#000', counter_color: str | None = '#fff', blur_sigma=None):
         super().__init__(parent)
-        self.bg_paint = skia.Paint(hex_str_to_int(bg))
+        if bg:
+            self.bg_paint = skia.Paint(hex_str_to_int(bg))
+        else:
+            self.bg_paint = None
+        if counter_color:
+            self.counter_paint = skia.Paint(hex_str_to_int(counter_color))
+            self.counter_paint.setAntiAlias(True)
+            self.counter_paint.setStyle(skia.Paint.kStroke_Style)
+            self.counter_paint.setStrokeWidth(1)
+            self.counter_paint.setStrokeCap(skia.Paint.kRound_Cap)
+            self.counter_paint.setStrokeJoin(skia.Paint.kRound_Join)
+        else:
+            self.counter_paint = None
+
+
+        if blur_sigma:
+            self.blur_paint = skia.Paint()
+            self.blur_paint.setImageFilter(skia.ImageFilters.Blur(blur_sigma, blur_sigma))
+        else:
+            self.blur_paint = None
 
     def draw_self(self, ctx: skia.Canvas):
-        ctx.drawRect(skia.Rect(0, 0, self.width, self.height), self.bg_paint)
+        r = skia.RRect(skia.Rect(0, 0, self.width, self.height), 5, 5)
+
+        if self.blur_paint:
+            ctx.save()
+            # 1. Жестко клипаем канвас по скругленным углам виджета
+            ctx.clipRRect(r, True)
+
+            # 2. Определяем сигму (подставь ту же, что у тебя в blur_paint)
+            # Примерный радиус влияния блюра — это sigma * 3
+            sigma = 10.0  # Замени на свою сигму, если она другая
+            padding = int(sigma * 3)
+
+            # 3. Вырезаем из окна область БОЛЬШЕ размера виджета (с запасом со всех сторон)
+            i_rect = skia.IRect.MakeXYWH(
+                int(self.global_x) - padding,
+                int(self.global_y) - padding,
+                int(self.width) + padding * 2,
+                int(self.height) + padding * 2
+            )
+            subset_image = self.window.get_surface().makeImageSnapshot(i_rect)
+
+            # 4. Рисуем картинку со смещением (на этот же padding),
+            # чтобы центр совпал с виджетом, а артефакты по краям ушли за пределы клипа
+            dst_rect = skia.Rect(-padding, -padding, self.width + padding, self.height + padding)
+            ctx.drawImageRect(subset_image, dst_rect, skia.SamplingOptions(), self.blur_paint)
+
+            ctx.restore()
+        if self.bg_paint:
+            ctx.drawRRect(r, self.bg_paint)
+        if self.counter_paint:
+            ctx.drawRRect(r, self.counter_paint)

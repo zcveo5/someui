@@ -135,13 +135,13 @@ class Win32Window(AbstractWindow):
         wndclass.cbSize = ctypes.sizeof(WNDCLASSEXW)
         wndclass.style = CS_OWNDC  # Обязательно CS_OWNDC для OpenGL!
         wndclass.lpfnWndProc = self._wnd_proc
-        wndclass.lpszClassName = "Win32MoreSkiaClass"
+        wndclass.lpszClassName = f"SomeUI{self.id}"
 
         RegisterClassExW(ctypes.byref(wndclass))
 
         self.hwnd = CreateWindowExW(
             0,
-            "Win32MoreSkiaClass",
+            f"SomeUI{self.id}",
             self._title,
             WS_OVERLAPPEDWINDOW,
             100, 100, self.width, self.height,
@@ -193,6 +193,9 @@ class Win32Window(AbstractWindow):
     def get_canvas(self) -> skia.Canvas:
         return self.surface.getCanvas()
 
+    def get_surface(self) -> skia.Surfaces:
+        return self.surface
+
     def _destroy(self):
         DestroyWindow(self.hwnd)
 
@@ -211,7 +214,7 @@ class Win32Window(AbstractWindow):
     def pool_forever(self):
         msg = MSG()
         while GetMessageW(ctypes.byref(msg), None, 0, 0):
-            print(e_expl.get(msg.message, f'{msg.message:04x}'))
+            #print(e_expl.get(msg.message, f'{msg.message:04x}'))
             TranslateMessage(ctypes.byref(msg))
             DispatchMessageW(ctypes.byref(msg))
 
@@ -221,7 +224,7 @@ class Win32Window(AbstractWindow):
         @hn.hd('WM_SIZE')
         @decode_cords
         def _update_size(w, h):
-            print(f'size update: {w, h}')
+            self._create_surface()
 
         @hn.hd('WM_DESTROY')
         @drop_param

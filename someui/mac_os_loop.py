@@ -50,14 +50,14 @@ def wakeup_mainloop():
     def dummy():
         pass
 
-    call_threadsafe(dummy)
+    call(dummy)
 
 
 def call_at(fnc, time_stmp):
     _call_at.append((fnc, time_stmp))
 
 
-def call_threadsafe(fnc, *args, **kwargs):
+def call(fnc, *args, **kwargs):
     _call_queue.put((fnc, args, kwargs))
 
     # Пробуждаем основной ранлуп через GCD (Grand Central Dispatch)

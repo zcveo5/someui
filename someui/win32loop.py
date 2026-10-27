@@ -30,7 +30,7 @@ def call_at(fnc, time_stmp):
     _call_at.append((fnc, time_stmp))
 
 
-def call_threadsafe(fnc, *args, **kwargs):
+def call(fnc, *args, **kwargs):
     _call_queue.put((fnc, args, kwargs))
     wakeup_mainloop()
 
@@ -39,6 +39,7 @@ def mainloop(windows):
     global _call_at
 
     for window in windows:
+        window.rebuild_scene()
         window.update()
 
     try:
@@ -73,13 +74,16 @@ def mainloop(windows):
                 if window.children_rebuild:
                     window.build_children()
                     window.invalidate()
+                if window.scene_rebuild:
+                    window.rebuild_scene()
+                    window.invalidate()
                 if window.dirty:
                     window.update()
 
             if _call_queue.empty() and not any(w.dirty for w in windows):
                 _reset_event()
 
-            if min_after > 0 and windows:
+            if min_after > 50 and windows:
                 MsgWaitForMultipleObjectsEx(1,
                                             _wake_up_event,
                                             int(min_after),
