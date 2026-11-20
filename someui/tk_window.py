@@ -35,7 +35,8 @@ from win32more.Windows.Win32.Graphics.Gdi import (
 )
 
 from abstract import AbstractWindow
-from widget_extensions import RRectWidget
+from someui import hex_str_to_int, PlacingConfig, Button, PlacementValue
+from widget_extensions import Container
 
 import ctypes
 from ctypes import c_ssize_t, c_uint
@@ -241,14 +242,18 @@ class TkinterWindow(AbstractWindow):
             SetWindowLongPtrW(self.hwnd, GWL_WNDPROC, self._old_wndproc_ptr)
             self._old_wndproc_ptr = 0
 
+    def destroy_window(self):
+        self._destroy()
+
+    def get_surface(self) -> skia.Surfaces:
+        return self._surface
+
 
 if __name__ == '__main__':
     def inject():
         btn.configure(state='disabled')
         tk_wnd = TkinterWindow(frame)
-        rrect = RRectWidget(tk_wnd)
-        rrect.paint.color = '#ffffff'
-        rrect.rel_place(0.1, 0.1, 0.9, 0.9)
+        Button(tk_wnd, 'Hello!', lambda: print('Hello!')).place(y=PlacementValue.auto())
         tk_wnd.update()
 
     root = tkinter.Tk()

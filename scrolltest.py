@@ -1,5 +1,5 @@
 from someui.glfw_window import GLFWWindow
-from someui.text_widgets import Label, Button
+from someui.text_basic import Label, Button
 from someui.widget_extensions import ScrollContainerWidget
 
 root = GLFWWindow()

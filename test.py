@@ -1,22 +1,22 @@
 import time
 
 from someui.glfw_window import GLFWWindow
-from someui.text_widgets import Label, Button
+from someui.text_basic import Label, Button
 from someui.widget_extensions import Container
 
-root = GLFWWindow()
+root = GLFWWindow(headerless=True)
 inf_fmt = 'cursor at: {}, {}'
 
 lbl_cursor = Label(root, '!')
-lbl_cursor.fast_pack()
+lbl_cursor.place(y='auto')
 
 lbl_click = Label(root, '!')
 lbl_click.set_position(0, lbl_cursor.global_y1)
-lbl_click.fast_pack()
+lbl_click.place(y='auto')
 
 lbl = Button(root, 'This should be at x:100 y:100', font_size=16, command=lambda: print('123'))
 lbl.set_position(100, 100)
-lbl.fast_pack()
+lbl.place(x=100, y=100)
 
 hover = Container(root, '#ff0000ff')
 hover.set_size(5, 5)
@@ -33,11 +33,11 @@ def change_size(a):
     return _w
 
 plus = Button(root, '+ Size', change_size(0.1))
-plus.fast_pack()
+plus.place(y='auto')
 plus.set_position(0, lbl_click.global_y1)
 
 subs = Button(root, '- Size', change_size(-0.1))
-subs.fast_pack()
+subs.place(y='auto')
 subs.set_position(plus.global_x1, lbl_click.global_y1)
 
 @root.on_mouse_press
@@ -50,11 +50,11 @@ def press(button, x, y):
 
 @root.on_mouse_exit
 def exit_mouse(*args):
-    lbl_cursor.text_paint.setColor(0xffff0000)
+    lbl_cursor._text_paint.setColor(0xffff0000)
 
 @root.on_mouse_enter
 def enter_mouse(*args):
-    lbl_cursor.text_paint.setColor(0xffffffff)
+    lbl_cursor._text_paint.setColor(0xffffffff)
 
 @root.on_hover
 def w(x, y):

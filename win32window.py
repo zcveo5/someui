@@ -2,6 +2,10 @@ import traceback
 from collections import defaultdict
 from typing import Literal
 
+import minhook
+from minhook import Hook
+
+from someui import GLFWWindow
 from someui.abstract import AbstractWindow
 import ctypes
 from win32more.Windows.Win32.Foundation import HWND, WPARAM, LPARAM
@@ -126,150 +130,15 @@ class EventHandler:
         return None
 
 
-class Win32Window(AbstractWindow):
-    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', frameless=False):
-        super().__init__(width, height, title, frameless)
-        self.handler = EventHandler()
+class GLFWPlusWindow(GLFWWindow):
+    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', headerless=False):
 
-        wndclass = WNDCLASSEXW()
-        wndclass.cbSize = ctypes.sizeof(WNDCLASSEXW)
-        wndclass.style = CS_OWNDC  # Обязательно CS_OWNDC для OpenGL!
-        wndclass.lpfnWndProc = self._wnd_proc
-        wndclass.lpszClassName = f"SomeUI{self.id}"
 
-        RegisterClassExW(ctypes.byref(wndclass))
+        super().__init__(width, height, title, headerless)
 
-        self.hwnd = CreateWindowExW(
-            0,
-            f"SomeUI{self.id}",
-            self._title,
-            WS_OVERLAPPEDWINDOW,
-            100, 100, self.width, self.height,
-            None, None, None, None
-        )
-
-        self.hdc = GetDC(self.hwnd)
-        self.create_event_handlers()
-
-        pfd = PIXELFORMATDESCRIPTOR()
-        pfd.nSize = ctypes.sizeof(PIXELFORMATDESCRIPTOR)
-        pfd.nVersion = 1
-        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
-        pfd.iPixelType = PFD_TYPE_RGBA
-        pfd.cColorBits = 32
-        pfd.cDepthBits = 24
-        pfd.cStencilBits = 8
-
-        pixel_format = ChoosePixelFormat(self.hdc, ctypes.byref(pfd))
-        SetPixelFormat(self.hdc, pixel_format, ctypes.byref(pfd))
-
-        self._hglrc = wglCreateContext(self.hdc)
-        wglMakeCurrent(self.hdc, self._hglrc)
-
-        self.skia_context = skia.GrDirectContext.MakeGL()
-        self._create_surface()
-
-    def show(self):
-        ShowWindow(self.hwnd, 5)
-
-    def hide(self):
-        ShowWindow(self.hwnd, 0)
-
-    def _set_size(self, w, h):
-        SetWindowPos(self.hwnd, 0, 0, 0, w, h, SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED)
-
-    def get_size(self) -> tuple[int, int]:
-        return self._width, self._height
-
-    def set_title(self, title: str):
-        SetWindowTextW(self.hwnd, title)
-
-    def get_native_handle(self) -> int | None:
-        return self.hwnd
-
-    def swap_buffers(self):
-        SwapBuffers(self.hdc)
-
-    def get_canvas(self) -> skia.Canvas:
-        return self.surface.getCanvas()
-
-    def get_surface(self) -> skia.Surfaces:
-        return self.surface
-
-    def _destroy(self):
-        DestroyWindow(self.hwnd)
-
-    def pool(self):
-        msg = MSG()
-        msg_c = 0
-        if not IsWindow(self.hwnd):
-            raise RuntimeError('Window destroyed')
-        while PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
-            if msg_c > 30:
-                break
-            TranslateMessage(ctypes.byref(msg))
-            DispatchMessageW(ctypes.byref(msg))
-            msg_c += 1
-
-    def pool_forever(self):
-        msg = MSG()
-        while GetMessageW(ctypes.byref(msg), None, 0, 0):
-            #print(e_expl.get(msg.message, f'{msg.message:04x}'))
-            TranslateMessage(ctypes.byref(msg))
-            DispatchMessageW(ctypes.byref(msg))
-
-    def create_event_handlers(self):
-        hn = self.handler
-
-        @hn.hd('WM_SIZE')
-        @decode_cords
-        def _update_size(w, h):
-            self._create_surface()
-
-        @hn.hd('WM_DESTROY')
-        @drop_param
-        def _cleanup():
-            wglMakeCurrent(None, None)
-            if self._hglrc:
-                wglDeleteContext(self._hglrc)
-            if self.hdc:
-                ReleaseDC(self.hwnd, self.hdc)
-
-    def _create_surface(self):
-        width, height = self.get_size()
-        if width <= 0 or height <= 0:
-            return
-
-        fb_info = skia.GrGLFramebufferInfo(0, 0x8058)
-
-        backend_target = skia.GrBackendRenderTarget(
-            width,
-            height,
-            0,
-            8,
-            fb_info,
-        )
-
-        self.surface = skia.Surface.MakeFromBackendRenderTarget(
-            self.skia_context,
-            backend_target,
-            skia.kBottomLeft_GrSurfaceOrigin,
-            skia.kRGBA_8888_ColorType,
-            skia.ColorSpace.MakeSRGB(),
-        )
-
-    def _wnd_proc(self, hwnd: HWND, msg: int, wparam: WPARAM, lparam: LPARAM):
-        try:
-            r = self.handler.process(msg, wparam, lparam)
-            if r is not None:
-                return r
-        except Exception as _ex:
-            _ex.add_note(f'Exception ignored while processing {msg:06x} for {hwnd}')
-            traceback.print_exception(_ex)
-        return DefWindowProcW(hwnd, msg, wparam, lparam)
 
 
 if __name__ == '__main__':
-    w = Win32Window()
+    w = GLFWPlusWindow()
     w.show()
-    w.pool_forever()
+    w.mainloop()

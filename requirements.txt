@@ -1,3 +1,4 @@
 glfw
 win32more
 skia-python
+python-dotenv

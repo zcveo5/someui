@@ -1,5 +1,8 @@
 import operator
 import platform
+import threading
+import time
+import traceback
 
 import glfw
 import skia
@@ -46,11 +49,9 @@ ACTIONS = {
 
 
 def resolve_key(key, scancode) -> str:
-    # 1. Проверяем, есть ли клавиша в словаре спецклавиш
     if key in SPECIAL_KEYS:
         return SPECIAL_KEYS[key]
 
-    # 2. Пробуем получить имя от GLFW (возвращает символ в текущей раскладке, например 'a', '1', '.')
     name = glfw.get_key_name(key, scancode)
     if name:
         return name.upper()
@@ -60,15 +61,13 @@ def resolve_key(key, scancode) -> str:
 
 system = platform.system()
 
-print(f'System: {system}')
-
 
 class GLFWWindow(AbstractWindow):
     """Window implementation based on GLFW"""
     _glfws = []
 
-    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', frameless=False):
-        super().__init__(width, height, title, frameless)
+    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', headerless=False):
+        super().__init__(width, height, title, headerless)
 
         if not glfw.init():
             raise RuntimeError('GLFW failed to init')
@@ -77,13 +76,9 @@ class GLFWWindow(AbstractWindow):
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 2)
 
-        if frameless:
-            glfw.window_hint(glfw.DECORATED, False)
-
-        # Профиль зависит от ОС: на macOS только Core, на Windows/Linux можно Compat
         if system == 'Darwin':
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-            glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)  # Обязательно для Core Profile на Mac
+            glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
             self.scale_mod = 2.0
         else:
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_COMPAT_PROFILE)
@@ -97,11 +92,17 @@ class GLFWWindow(AbstractWindow):
             glfw.terminate()
             raise RuntimeError()
 
-        glfw.make_context_current(window)
-        glfw.swap_interval(1)
+        self.surface_dirty = True
 
-        self.skia_context: skia.GrBackendRenderTargets = skia.GrDirectContext.MakeGL()
-        self._create_surface()
+        self.skia_context: skia.GrBackendRenderTargets | None = None
+        self.surface: skia.Surfaces | None = None
+
+        self.surface_props = skia.SurfaceProps(
+            skia.SurfaceProps.kUseDeviceIndependentFonts_Flag,
+            skia.PixelGeometry.kRGB_H_PixelGeometry
+        )
+
+        self._maximized = False
 
         glfw.set_window_close_callback(window, self._on_close_callback)
         glfw.set_framebuffer_size_callback(window, self._on_resize)
@@ -109,6 +110,7 @@ class GLFWWindow(AbstractWindow):
         glfw.set_cursor_pos_callback(window, _ignore_first(self.dispatch_hover))
         glfw.set_scroll_callback(window, _ignore_first(self._wrap_scroll))
         glfw.set_key_callback(window, _ignore_first(self._process_char))
+        glfw.set_window_maximize_callback(window, _ignore_first(self._maximized_proc))
 
         self.mcfg.propagate = False
 
@@ -119,11 +121,50 @@ class GLFWWindow(AbstractWindow):
 
         def _on_cursor_exit(wnd, entered):
             if not entered:
-                self.on_mouse_exit.process()
+                self.on_mouse_exit.process(self.mouse_x, self.mouse_y)
             else:
                 self.on_mouse_enter.process()
 
         glfw.set_cursor_enter_callback(self._window, _on_cursor_exit)
+
+        super().__post_init__()
+
+    def win32_handle(self) -> int:
+        return glfw.get_win32_window(self._window)
+
+    def _maximized_proc(self, val):
+        self._maximized = val == 1
+        self.on_maximize.process(self._maximized)
+
+    def _render_thread(self):
+        window = self._window
+        glfw.make_context_current(window)
+        glfw.swap_interval(1)
+
+        self.skia_context = skia.GrDirectContext.MakeGL()
+
+        last_time = time.time()
+
+        try:
+            while self.is_running:
+                current_time = time.time()
+                dt = current_time - last_time
+                last_time = current_time
+
+                if self.surface_dirty:
+                    self._create_surface()
+
+                self.on_animation_frame.process(dt)
+
+                self.render(self.get_canvas())
+                self.surface.flushAndSubmit()
+                glfw.swap_buffers(window)
+        except Exception as _ex:
+            traceback.print_exception(_ex)
+            self.destroy()
+        finally:
+            self.skia_context.abandonContext()
+            self.skia_context = None
 
     def _wrap_scroll(self, dx, dy):
         if system == 'Windows':
@@ -158,11 +199,22 @@ class GLFWWindow(AbstractWindow):
         elif action_str == 'press' or action_str == 'repeat':
             self.on_keyboard_write.process(key_str, shift_state, ctrl_state, alt_state)
 
+    @property
+    def is_maximized(self) -> bool:
+        return self._maximized
+
+    @is_maximized.setter
+    def is_maximized(self, value):
+        if value:
+            glfw.maximize_window(self._window)
+        else:
+            glfw.restore_window(self._window)
+
     def show(self):
         glfw.show_window(self._window)
 
     def hide(self):
-        glfw.hide_window(self._window)
+        glfw.iconify_window(self._window)
 
     def _set_size(self, w, h):
         glfw.set_window_size(self._window, int(w), int(h))
@@ -183,7 +235,7 @@ class GLFWWindow(AbstractWindow):
     def get_surface(self) -> skia.Surface:
         return self.surface
 
-    def _destroy(self):
+    def destroy_window(self):
         if self._window:
             glfw.destroy_window(self._window)
 
@@ -200,10 +252,14 @@ class GLFWWindow(AbstractWindow):
 
     def _on_resize(self, win, width, height):
         self._width, self._height = width, height
-        self._create_surface()
+        self._invalidate_surface()
         self.on_resize.process(width, height)
-        self.update()
+        if width % 10 == 0 or height % 10 == 0:
+            self.rebuild_scene()
         self.invalidate_place()
+
+    def _invalidate_surface(self):
+        self.surface_dirty = True
 
     def _create_surface(self):
         width, height = glfw.get_framebuffer_size(self._window)
@@ -220,16 +276,34 @@ class GLFWWindow(AbstractWindow):
             fb_info,
         )
 
-        surface_props = skia.SurfaceProps(
-            skia.SurfaceProps.kUseDeviceIndependentFonts_Flag,
-            skia.PixelGeometry.kRGB_H_PixelGeometry
-        )
-
         self.surface = skia.Surface.MakeFromBackendRenderTarget(
             self.skia_context,
             backend_target,
             skia.kBottomLeft_GrSurfaceOrigin,
             skia.kRGBA_8888_ColorType,
             skia.ColorSpace.MakeSRGB(),
-            surface_props
+            self.surface_props
         )
+
+        if self.surface is None:
+            raise RuntimeError(f'Surface is None')
+
+
+from typing import Self
+
+
+class WindowHeaderWidgetMixin:
+    window: GLFWWindow
+
+    def __init__(self: 'Self@WindowHeaderWidgetMixin'):
+        if not isinstance(self.window, GLFWWindow):
+            raise ValueError(self.window)
+
+        self.on_hover_enter(self._set_header)
+        self.on_hover_exit(self._reset_header)
+
+    def _set_header(self, *_):
+        self.window.on_header = True
+
+    def _reset_header(self, *_):
+        self.window.on_header = False

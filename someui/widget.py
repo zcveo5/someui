@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import enum
 import operator
-import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
-
 import skia
+
+from someui import defaults
+from someui.util import Event, Defaults
 
 if TYPE_CHECKING:
     import abstract as tc_window
@@ -13,42 +15,64 @@ if TYPE_CHECKING:
 
 _get_z_attr = operator.attrgetter('z')
 
-DEBUG_FONT = skia.Font(skia.Typeface(), 14)
-DEBUG_RED = skia.Paint(0x44ff0000)
-DEBUG_BLACK = skia.Paint(skia.ColorBLACK)
+
+class Direction(enum.Enum):
+    COLUMN = 0
+    ROW = 1
 
 
-class Event:
-    def __init__(self):
-        self._functions = []
-        self._is_processing = False
+class PlacementType(enum.Enum):
+    FIXED = 0
+    AUTO = 1
+    RELATIVE = 2
 
-    def __call__(self, fnc):
-        self._functions.append(fnc)
-        return fnc
 
-    def process(self, *args):
-        if self._is_processing:
-            return
-        self._is_processing = True
-        [i(*args) for i in self._functions]
-        self._is_processing = False
+@dataclass(frozen=True)
+class PlacementValue:
+    """Порт C# PlacementValue: одно значение размещения с типом"""
+    type: PlacementType = PlacementType.AUTO
+    value: float = 0.0
+    offset: float = 0.0
+
+    @staticmethod
+    def fixed(value: float) -> 'PlacementValue':
+        return PlacementValue(PlacementType.FIXED, value)
+
+    @staticmethod
+    def auto() -> 'PlacementValue':
+        return PlacementValue(PlacementType.AUTO)
+
+    @staticmethod
+    def relative(value: float) -> 'PlacementValue':
+        return PlacementValue(PlacementType.RELATIVE, value)
 
 
 @dataclass(kw_only=True, frozen=True)
 class PlacingConfig:
-    x: float | None | Literal['auto'] = None
-    y: float | None | Literal['auto'] = None
-    relative_x: float | None = None
-    relative_y: float | None = None
-    width: int | None = None
-    height: int | None = None
-    relative_width: float | None = None
-    relative_height: float | None = None
+    """Порт C# PlacementConfig"""
+    x: PlacementValue = PlacementValue.fixed(0)
+    y: PlacementValue = PlacementValue.fixed(0)
+    width: PlacementValue = PlacementValue.auto()
+    height: PlacementValue = PlacementValue.auto()
+    anchor: Literal['left', 'right'] = 'left'
+
+
+@dataclass(kw_only=True, frozen=True)
+class Margins:
+    """Порт C# Margins"""
+    left: float = 0.0
+    top: float = 0.0
+    right: float = 0.0
+    bottom: float = 0.0
+
 
 @dataclass(kw_only=True)
-class MyPlacingHint:
-    propagate: bool = False
+class ChildrenPlacementConfig:
+    """Порт C# ChildrenPlacementConfig: как раскладываются дети виджета"""
+    child_direction: Direction = Direction.COLUMN
+    gap: float = 0.0
+    margins: Margins = field(default_factory=Margins)
+    propagate: bool = True
 
 
 def do_rectangles_overlap(rect1, rect2):
@@ -60,13 +84,39 @@ def do_rectangles_overlap(rect1, rect2):
     return True
 
 
+def _coerce_placement(value, relative: bool = False) -> PlacementValue:
+    """Число -> Fixed, 'auto' -> Auto, float с relative=True -> Relative.
+    Готовый PlacementValue проходит как есть."""
+    if isinstance(value, PlacementValue):
+        return value
+    if isinstance(value, str) and value.strip().lower() == 'auto':
+        return PlacementValue.auto()
+    if relative:
+        return PlacementValue.relative(value)
+    return PlacementValue.fixed(value)
+
+
+def _coerce_placement_kwargs(kwargs: dict) -> dict:
+    """Поддержка старого синтаксиса place(relative_width=..., x=..., y='auto')."""
+    out = {}
+    for key, value in kwargs.items():
+        if key in ('x', 'y', 'width', 'height'):
+            out[key] = _coerce_placement(value)
+        elif key in ('relative_x', 'relative_y', 'relative_width', 'relative_height'):
+            out[key.removeprefix('relative_')] = _coerce_placement(value, relative=True)
+        else:
+            raise TypeError(f'place(): неожидаемый параметр {key!r}')
+    return out
+
+
 class Widget:
     """Base widget class"""
     widget_type = 'Widget'
 
     window: tc_window.AbstractWindow
-    parent: Widget
+    parent: Widget | None
     children: dict[int, Widget]
+    defaults: Defaults
 
     last_id = 0
 
@@ -76,9 +126,19 @@ class Widget:
         self._enabled = True
         self.visible = False
         self.hidden = False
+        self.placeable = True
+        self.clip_self = True
+
+        self.clickable = True
+        self.hoverable = True
+        self.draggable = True
+
+        if parent is not None:
+            parent = parent.real()
+
         self.id = Widget.last_id
         Widget.last_id += 1
-        self.name = f'{self.__class__.__mro__[0].__name__}{self.id}'
+        self.name = f'{self.__class__.__mro__[0].__name__}{'' if parent else ' Window'}'
 
         self.children = {}
 
@@ -90,6 +150,10 @@ class Widget:
         else:
             self.window = self
             self._z = 0
+
+        self.defaults = defaults.RootDefaults
+        if self.parent is not None:
+            self.defaults = self.parent.defaults
 
         self._x = 0
         self._y = 0
@@ -119,7 +183,8 @@ class Widget:
         self.caching_bmp_enabled = False
 
         self.pcfg = PlacingConfig()
-        self.mcfg = MyPlacingHint()
+        self.mcfg = ChildrenPlacementConfig()
+        self._required: tuple[float, float] | None = None
 
         if self.parent:
             self.parent.add_child(self)
@@ -127,6 +192,9 @@ class Widget:
         self.on_hold_move = Event()
 
         self.held = False
+
+    def real(self):
+        return self
 
     @property
     def z(self):
@@ -145,6 +213,7 @@ class Widget:
     @enabled.setter
     def enabled(self, value):
         self._enabled = value
+        self.window.invalidate_place()
         self.window.invalidate_children()
 
     def cord_to_local(self, gx, gy):
@@ -153,15 +222,30 @@ class Widget:
     def get_size_hint(self):
         return 0, 0
 
+    def required_size(self) -> tuple[float, float]:
+        """Порт C# RequiredWidth/RequiredHeight: если виджет сам считает
+        свой размер из детей (propagate), значение кладёт Measure,
+        иначе берётся get_size_hint() как у листовых виджетов."""
+        if not self._enabled:
+            return 0, 0
+        if self._required is not None:
+            return self._required
+        return self.get_size_hint()
+
     def invalidate_place(self):
         self.dirty_placement = True
         self.window.invalidate_place()
 
-    def place(self, config: PlacingConfig | None = None, **kwargs):
-        if config:
+    def place(self, config: PlacingConfig | None = None, *,
+              x: PlacementValue = PlacementValue.fixed(0),
+              y: PlacementValue = PlacementValue.fixed(0),
+              width: PlacementValue = PlacementValue.auto(),
+              height: PlacementValue = PlacementValue.auto(),
+              anchor: Literal['left', 'right'] = 'left'):
+        if config is not None:
             self.pcfg = config
         else:
-            self.pcfg = PlacingConfig(**kwargs)
+            self.pcfg = PlacingConfig(x=x, y=y, width=width, height=height, anchor=anchor)
 
         self.invalidate_place()
         self.invalidate()
@@ -218,6 +302,9 @@ class Widget:
         return self.global_y + self.height
 
     def set_size(self, w=None, h=None, x1=None, y1=None):
+        if self._width == w and self._height == h:
+            return
+
         if w is not None and h is not None:
             self._width = w
             self._height = h
@@ -230,8 +317,13 @@ class Widget:
         self.on_resize.process(w, h)
 
     def set_position(self, x, y):
+        if self.x == x and self.y == y:
+            return
+
         self._x = x
         self._y = y
+
+        self.on_repos.process(x, y)
 
     def iter_children(self):
         for c in self.children.values():
@@ -250,7 +342,8 @@ class Widget:
         self.window.invalidate_children()
 
     def remove_child(self, child):
-        del self.children[child.id]
+        self.children.pop(child.id)
+        self.window.invalidate_children()
 
     def invalidate(self):
         self.dirty = True
@@ -285,37 +378,54 @@ class Widget:
             l, t, r, b = max(l, pl), max(t, pt), min(r, pr), min(b, pb)
         return l, t, r, b
 
+    def draw_post(self, ctx: skia.Canvas):
+        pass
+
     def draw(self, ctx: skia.Canvas):
         if not self.enabled:
             return
 
         l, t, r, b = self.visible_rect()
-        if r <= l or b <= t:  # целиком обрезан предком
-            return
 
-        if not do_rectangles_overlap([self.global_x, self.global_y, self.global_x1, self.global_y1],
-                                 [self.parent.global_x, self.parent.global_y, self.parent.global_x1, self.parent.global_y1]):
+        if r <= l or b <= t:
             self.visible = False
             return
+
+        if self.parent:
+            if not do_rectangles_overlap([self.global_x, self.global_y, self.global_x1, self.global_y1],
+                                     [self.parent.global_x, self.parent.global_y, self.parent.global_x1, self.parent.global_y1]):
+                self.visible = False
+                return
+
         self.visible = True
 
         if self.dirty or self._bmp is None:
             self.dirty = False
             ctx.save()
-            ctx.clipRect(skia.Rect(l, t, r, b), skia.ClipOp.kIntersect, True)  # сначала клип в глобальных координатах
-            ctx.translate(self.global_x, self.global_y)  # потом сдвиг
+
+            # 1. Сдвигаем холст в верхний левый угол виджета
+            ctx.translate(self.global_x, self.global_y)
+
+            if self.clip_self:
+                # l, t, r, b — это глобальные координаты из твоей visible_rect()
+                # Переводим их в локальные координаты виджета, вычитая его позицию:
+                local_l = l - self.global_x
+                local_t = t - self.global_y
+                local_r = r - self.global_x
+                local_b = b - self.global_y
+
+                # 2. Режем в локальной системе координат.
+                # Если родитель меньше виджета, local_r/local_b обрежут его по размеру родителя!
+                ctx.clipRect(skia.Rect(local_l, local_t, local_r, local_b), skia.ClipOp.kIntersect, True)
+
             self.draw_self(ctx)
             ctx.restore()
 
-            if self.caching_bmp_enabled:
-                self._bmp_pos = (l, t)
-                self._bmp = self.window.get_surface().makeImageSnapshot(
-                    skia.IRect.MakeLTRB(int(l), int(t), int(r), int(b)))
-        else:
-            ctx.drawImage(self._bmp, *self._bmp_pos)
+            self.draw_post(ctx)
+
 
     def __repr__(self):
-        return f'<{self.widget_type} name={self.name} id={self.id} gx={self.global_x} gy={self.global_y} width={self.width} height={self.height}>'
+        return f'<{self.widget_type} name="{self.name}" id={self.id} gx={self.global_x} gy={self.global_y} width={self.width} height={self.height}>'
 
     def destroy_render_resources(self):
         pass

@@ -3,6 +3,8 @@ import queue
 import ctypes
 import ctypes.util
 
+from someui.crossplatform.window_loops.abstract import AbstractWindowLoop
+
 # Загружаем необходимые фреймворки macOS
 libobjc = ctypes.CDLL(ctypes.util.find_library('objc'))
 libdispatch = ctypes.CDLL(ctypes.util.find_library('System'))
@@ -142,3 +144,17 @@ def mainloop(windows):
             NSDefaultRunLoopMode,
             later_date
         )
+
+
+class Loop(AbstractWindowLoop):
+    def _run(self):
+        mainloop(self.windows)
+
+    def call_at(self, fnc, ts):
+        call_at(fnc, ts)
+
+    def call(self, fnc, *args, **kwargs):
+        call(fnc, *args, **kwargs)
+
+    def wakeup(self):
+        wakeup_mainloop()

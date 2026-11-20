@@ -1,10 +1,14 @@
 from __future__ import annotations
 import abc
 import operator
+import threading
+
 import skia
-from . import widget
+from someui import widget
 import time
-from someui.universal_loop import NativeLoop, AbstractWindowLoop
+
+from someui.crossplatform.headerless import AbstractProtocol, get as get_headerless
+from someui.crossplatform.window_loops.abstract import NativeLoop, AbstractWindowLoop
 
 if NativeLoop is None:
     raise ImportError('NativeLoop not found')
@@ -21,16 +25,18 @@ def get_loop() -> AbstractWindowLoop:
 class AbstractWindow(widget.Widget, abc.ABC):
     windows: list[AbstractWindow] = []
 
-    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', frameless=False):
+    def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', headerless=False):
         super().__init__(None)
         self._width = width
         self._height = height
         self._title = title
+        self._headerless = headerless
 
         self.is_running = True
         self.flat_children: list[widget.Widget] = []
         self.children_rebuild = False
         self.scene_rebuild = False
+        self.scene_rebuilding = False
 
         self.mouse_x, self.mouse_y = 0, 0
         self.window_background = 0x0
@@ -43,9 +49,61 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.on_keyboard_release = widget.Event() # Release
         self.on_keyboard_write = widget.Event() # Press & Repeat
         self.on_resize.process(width, height)
+        self.on_animation_frame = widget.Event()
+        self.on_maximize = widget.Event()
+        self.on_scene_rebuild = widget.Event()
 
         self.windows.append(self)
         _loop.windows.append(self)
+
+    def __post_init__(self):
+        _inst = get_headerless()
+        self.headerless_helper: AbstractProtocol | None = None
+        if _inst is not None:
+            self.headerless_helper = _inst(self)
+            if self._headerless:
+                self.headerless_helper.enable()
+
+        self.render_thread = threading.Thread(target=self._render_thread, name=f'{self.name}-RenderThread')
+        self.render_thread.start()
+
+    @property
+    def on_header(self):
+        if self.headerless_helper:
+            return self.headerless_helper.on_header
+        return False
+
+    @on_header.setter
+    def on_header(self, value):
+        if self.headerless_helper:
+            self.headerless_helper.on_header = value
+
+    @property
+    def headerless(self):
+        return self._headerless
+
+    @headerless.setter
+    def headerless(self, value):
+        self._headerless = value
+        if self.headerless_helper is not None:
+            if value:
+                self.headerless_helper.enable()
+            else:
+                self.headerless_helper.disable()
+
+    @abc.abstractmethod
+    def win32_handle(self) -> int: ...
+
+    @abc.abstractmethod
+    def _render_thread(self): ...
+
+    @property
+    @abc.abstractmethod
+    def is_maximized(self) -> bool: ...
+
+    @is_maximized.setter
+    @abc.abstractmethod
+    def is_maximized(self, value): ...
 
     @abc.abstractmethod
     def show(self): ...
@@ -75,9 +133,10 @@ class AbstractWindow(widget.Widget, abc.ABC):
     def pool(self): ...
 
     @abc.abstractmethod
-    def _destroy(self): ...
+    def destroy_window(self): ...
 
     def destroy(self):
+        self.destroy_window()
         if self in self.windows:
             self.windows.remove(self)
         if self in _loop.windows:
@@ -117,88 +176,140 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.flat_children = _flat
 
     def rebuild_scene(self):
+        if self.scene_rebuilding:
+            raise RuntimeError('Scene is rebuilding')
+
+        self.scene_rebuilding = True
         self.scene_rebuild = False
 
-        def build_widget(wdg: widget.Widget):
-            base_w, base_h = wdg.width, wdg.height  # размер родителя — база для relative
-            auto_y = 0
-            max_w = 0
-            deferred = []
+        try:
+            self._rebuild_scene(self)
+        finally:
+            self.scene_rebuilding = False
 
-            for c in wdg.iter_children():
-                #if not c.enabled:
-                #    continue
+        self.on_scene_rebuild.process()
 
-                # propagate-виджет: сначала раскладываем его внутренности (снизу вверх),
-                # его размер станет известен после этого
-                if c.mcfg.propagate:
-                    build_widget(c)
+    def _measure(self, wdg: widget.Widget):
+        """Порт SceneWidget.Measure: считает required-размер виджета из детей
+        (только если propagate), снизу вверх."""
+        ccfg = wdg.mcfg
 
-                cfg = c.pcfg
-                hint_w, hint_h = c.get_size_hint()
-                if c.mcfg.propagate:
-                    hint_w, hint_h = c.width, c.height
+        if not ccfg.propagate or not wdg.enabled:
+            return
 
-                tx = cfg.x if cfg.x is not None else 0
-                if cfg.y == 'auto':
-                    ty = auto_y
-                else:
-                    ty = cfg.y if cfg.y is not None else 0
+        for c in wdg.iter_children():
+            self._measure(c)
 
-                if cfg.width is not None:
-                    tw = cfg.width
-                elif cfg.relative_width is not None:
-                    tw = base_w * cfg.relative_width
-                else:
-                    tw = hint_w
+        total_w = 0.0
+        total_h = 0.0
 
-                if cfg.height is not None:
-                    th = cfg.height
-                elif cfg.relative_height is not None:
-                    th = base_h * cfg.relative_height
-                else:
-                    th = hint_h
+        for c in wdg.iter_children():
+            cw, ch = c.required_size()
 
-                if cfg.relative_x is not None:
-                    tx = base_w * cfg.relative_x
-                if cfg.relative_y is not None:
-                    ty = base_h * cfg.relative_y
+            if ccfg.child_direction == widget.Direction.COLUMN:
+                total_h += ch + ccfg.gap
+                total_w = max(total_w, cw)
+            else:
+                total_w += cw + ccfg.gap
+                total_h = max(total_h, ch)
 
-                if cfg.y == 'auto':
-                    auto_y += th
-                max_w = max(max_w, tx + tw)
+        if wdg.children:
+            m = ccfg.margins
+            wdg._required = (total_w + m.left + m.right, total_h + m.top + m.bottom)
 
-                c.set_position(tx, ty)
-                c.set_size(tw, th)
-                deferred.append(c)
+    def _resolve_place(self, wdg: widget.Widget, child: widget.Widget, auto: float):
+        """Порт SceneWidget.ResolvePlace: возвращает (x, y, w, h, auto)."""
+        if not wdg.enabled:
+            return 0, 0, 0, 0, auto
 
-            # теперь размер каждого ребёнка известен — идём вглубь
-            for c in deferred:
-                if not c.mcfg.propagate:  # propagate уже обработан выше
-                    build_widget(c)
+        ccfg = wdg.mcfg
+        m = ccfg.margins
 
-            if wdg.mcfg.propagate:
-                wdg.set_size(max_w, min(auto_y, wdg.parent.height))
+        available_width = wdg.width - m.left - m.right
+        available_height = wdg.height - m.top - m.bottom
 
-        build_widget(self)
+        p = child.pcfg
 
+        if p.width.type == widget.PlacementType.FIXED:
+            w = p.width.value
+        elif p.width.type == widget.PlacementType.RELATIVE:
+            w = available_width * p.width.value
+        else:
+            w = child.required_size()[0]
 
-    def render(self, ctx):
+        w += p.width.offset
+
+        if p.height.type == widget.PlacementType.FIXED:
+            h = p.height.value
+        elif p.height.type == widget.PlacementType.RELATIVE:
+            h = available_height * p.height.value
+        else:
+            h = child.required_size()[1]
+
+        h += p.height.offset
+
+        x = 0.0
+        if p.x.type == widget.PlacementType.FIXED:
+            x = p.x.value
+        elif p.x.type == widget.PlacementType.RELATIVE:
+            x = available_width * p.x.value
+        elif p.x.type == widget.PlacementType.AUTO and ccfg.child_direction == widget.Direction.ROW:
+            x = auto
+            auto += w + ccfg.gap
+
+        x += m.left + p.x.offset
+
+        if p.anchor == 'right':
+            x -= w
+
+        y = 0.0
+        if p.y.type == widget.PlacementType.FIXED:
+            y = p.y.value
+        elif p.y.type == widget.PlacementType.RELATIVE:
+            y = available_height * p.y.value
+        elif p.y.type == widget.PlacementType.AUTO and ccfg.child_direction == widget.Direction.COLUMN:
+            y = auto
+            auto += h + ccfg.gap
+
+        y += m.top + p.y.offset
+
+        return x, y, w, h, auto
+
+    def _rebuild_scene(self, wdg: widget.Widget):
+        """Порт SceneWidget.RebuildScene."""
+        if wdg.mcfg.propagate:
+            self._measure(wdg)
+
+        auto = 0.0
+
+        for child in wdg.iter_children():
+            if not child.placeable:
+                continue
+
+            if child.enabled:
+                x, y, w, h, auto = self._resolve_place(wdg, child, auto)
+
+                child.set_position(x, y)
+                child.set_size(w, h)
+
+                self._rebuild_scene(child)
+
+    def render(self, ctx: skia.Canvas):
+        ctx.clear(self.window_background)
+
         ctx.save()
         ctx.scale(self.scale_mod, self.scale_mod)
 
         for i in self.flat_children:
-            i.draw(ctx)
+            try:
+                i.draw(ctx)
+            except Exception as _ex:
+                _ex.add_note(f'While rendering {i}')
+                raise _ex
 
         ctx.restore()
 
     def update(self):
-        canvas = self.get_canvas()
-        if canvas is None:
-            return
-        canvas.clear(self.window_background)
-        self.render(canvas)
-        self.swap_buffers()
         self.dirty = False
 
     def request_redraw(self):
@@ -216,8 +327,10 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
         self.on_hover.process(x, y)
 
+        given = False
+
         for _child in reversed(self.flat_children):
-            if not _child.enabled:
+            if not _child.enabled or not _child.hoverable:
                 continue
 
             if _child.held:
@@ -225,12 +338,14 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
             is_hovered = _child.hittest(x, y)
 
-            if is_hovered:
+            if is_hovered and not given:
                 if not _child.hovered:
                     _child.hovered = True
                     _child.on_hover_enter.process(x, y)
 
                 _child.on_hover.process(x, y)
+
+                given = True
             elif _child.hovered:
                 _child.hovered = False
                 _child.on_hover_exit.process(x, y)
@@ -256,7 +371,7 @@ class AbstractWindow(widget.Widget, abc.ABC):
             self.on_mouse_release.process(button, x, y)
 
         for _child in reversed(self.flat_children):
-            if not _child.enabled:
+            if not _child.enabled  or not _child.clickable:
                 continue
             if _child.hittest(x, y):
                 if action == 1:  # PRESS

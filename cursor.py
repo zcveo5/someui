@@ -8,6 +8,8 @@ class Cursor(someui.Label):
     def __init__(self, parent: Widget):
         super().__init__(parent)
         self.z = 9999
+        self.clip_self = False
+        self.placeable = False
 
         self.window.on_hover(self._on_hover)
 
@@ -26,6 +28,3 @@ class Cursor(someui.Label):
         self.set_position(x, y)
 
         self.set_size(self._text_width, self._text_height)
-
-    def draw_self(self, ctx: skia.Canvas):
-        super().draw_self(ctx)

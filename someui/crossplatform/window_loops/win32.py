@@ -8,6 +8,8 @@ from win32more.Windows.Win32.Foundation import CloseHandle
 import ctypes
 import queue
 
+from someui.crossplatform.window_loops.abstract import AbstractWindowLoop
+
 _wake_up_event = ctypes.c_void_p(CreateEventW(None, True, False, 'UiWakeUp'))
 _call_queue = queue.Queue()
 _call_at = []
@@ -40,7 +42,6 @@ def mainloop(windows):
 
     for window in windows:
         window.rebuild_scene()
-        window.update()
 
     try:
         timeBeginPeriod(1)
@@ -77,8 +78,8 @@ def mainloop(windows):
                 if window.scene_rebuild:
                     window.rebuild_scene()
                     window.invalidate()
-                if window.dirty:
-                    window.update()
+                #if window.dirty:
+                #    window.update()
 
             if _call_queue.empty() and not any(w.dirty for w in windows):
                 _reset_event()
@@ -92,3 +93,17 @@ def mainloop(windows):
     finally:
         timeEndPeriod(1)
         CloseHandle(_wake_up_event)
+
+
+class Loop(AbstractWindowLoop):
+    def _run(self):
+        mainloop(self.windows)
+
+    def call_at(self, fnc, ts):
+        call_at(fnc, ts)
+
+    def call(self, fnc, *args, **kwargs):
+        call(fnc, *args, **kwargs)
+
+    def wakeup(self):
+        wakeup_mainloop()
