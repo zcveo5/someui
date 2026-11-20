@@ -2,3 +2,4 @@
 /.venv/*
 /someui/.env
 /someui/someUiLogging
+/cmake-build-debug/*

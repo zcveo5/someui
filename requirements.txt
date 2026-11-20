@@ -2,3 +2,6 @@ glfw
 win32more
 skia-python
 python-dotenv
+pyobjc-framework-metal
+pyobjc-framework-cocoa
+pyobjc-core

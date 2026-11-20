@@ -1,4 +1,4 @@
-from someui.glfw_window import GLFWWindow
+from someui.windows.glfw_window import GLFWWindow
 from someui.text_basic import Label, Button
 from someui.widget_extensions import ScrollContainerWidget
 

@@ -1,10 +1,11 @@
 import skia
 from someui import util, colors
-from someui.glfw_window import WindowHeaderWidgetMixin, GLFWWindow
+from someui.windows.glfw_window import WindowHeaderWidgetMixin
 from someui.widgets.animated_button import PrettyButton
 from someui.widget import PlacingConfig, PlacementType, PlacementValue, Direction as PlacementDirection
 from someui.widgets.label import Label
 from someui.widget_extensions import Container
+from someui.windows.platrel_window import WindowForPlatform
 
 
 class HeadButton(PrettyButton):
@@ -31,7 +32,8 @@ class MaximizeButton(HeadButton):
         new_rect = (int(self.global_x), int(self.global_y), int(self.global_x1), int(self.global_y1))
         if new_rect != self._last_sent_rect:
             self._last_sent_rect = new_rect
-            self.window.headerless_helper.set_maxi_rect(*new_rect)
+            if self.window.headerless_helper is not None:
+                self.window.headerless_helper.set_maxi_rect(*new_rect)
 
     def _command_wrapper(self, btn, x, y):
         super()._command_wrapper(btn, x, y)
@@ -80,7 +82,7 @@ class HeadContainer(Container, WindowHeaderWidgetMixin):
 
 
 
-class Headered(GLFWWindow):
+class Headered(WindowForPlatform):
     """Frameless GLFW Window with custom header with Windows style"""
 
     HEAD_HEIGHT = 32

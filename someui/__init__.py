@@ -1,4 +1,4 @@
-from .glfw_window import GLFWWindow
+from someui.windows.glfw_window import GLFWWindow
 from .widget import Widget, PlacementValue, PlacingConfig, PlacementType, Direction as PlacementDirection, Margins
 from .widget_extensions import Container
 from .crossplatform.headerless_styles import HeaderlessWindow

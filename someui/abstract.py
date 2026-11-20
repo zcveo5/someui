@@ -13,7 +13,7 @@ from someui.crossplatform.window_loops.abstract import NativeLoop, AbstractWindo
 if NativeLoop is None:
     raise ImportError('NativeLoop not found')
 
-_loop: AbstractWindowLoop = NativeLoop([])
+_loop: AbstractWindowLoop = NativeLoop()
 
 _get_z_attr = operator.attrgetter('z')
 
@@ -41,7 +41,7 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.mouse_x, self.mouse_y = 0, 0
         self.window_background = 0x0
 
-        self.scale_mod = 1.0
+        self.scale_x = self.scale_y = 1.0
 
         self.on_mouse_exit = widget.Event()
         self.on_mouse_enter = widget.Event()
@@ -51,10 +51,11 @@ class AbstractWindow(widget.Widget, abc.ABC):
         self.on_resize.process(width, height)
         self.on_animation_frame = widget.Event()
         self.on_maximize = widget.Event()
+        self.on_ready = widget.Event()
         self.on_scene_rebuild = widget.Event()
 
         self.windows.append(self)
-        _loop.windows.append(self)
+        _loop.attach(self)
 
     def __post_init__(self):
         _inst = get_headerless()
@@ -63,6 +64,8 @@ class AbstractWindow(widget.Widget, abc.ABC):
             self.headerless_helper = _inst(self)
             if self._headerless:
                 self.headerless_helper.enable()
+
+        self.on_ready.process()
 
         self.render_thread = threading.Thread(target=self._render_thread, name=f'{self.name}-RenderThread')
         self.render_thread.start()
@@ -93,6 +96,9 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
     @abc.abstractmethod
     def win32_handle(self) -> int: ...
+
+    @abc.abstractmethod
+    def macos_handle(self): ...
 
     @abc.abstractmethod
     def _render_thread(self): ...
@@ -130,17 +136,29 @@ class AbstractWindow(widget.Widget, abc.ABC):
     def get_surface(self) -> skia.Surfaces: ...
 
     @abc.abstractmethod
-    def pool(self): ...
+    def pool_native(self): ...
+
+    def pool(self):
+        self.pool_native()
+        if self.scene_rebuild:
+            self.rebuild_scene()
+        if self.children_rebuild:
+            self.build_children()
 
     @abc.abstractmethod
     def destroy_window(self): ...
 
+    def get_size_hint(self):
+        return self.get_size()
+
     def destroy(self):
+        self.hide()
+        self.render_thread.join()
         self.destroy_window()
         if self in self.windows:
             self.windows.remove(self)
         if self in _loop.windows:
-            _loop.windows.remove(self)
+            _loop.deattach(self)
         self.is_running = False
         _loop.wakeup()
 
@@ -174,6 +192,107 @@ class AbstractWindow(widget.Widget, abc.ABC):
 
         _flat.sort(key=_get_z_attr)
         self.flat_children = _flat
+
+    def render(self, ctx: skia.Canvas):
+        ctx.clear(self.window_background)
+
+        ctx.save()
+        ctx.scale(self.scale_x, self.scale_y)
+
+        for i in self.flat_children:
+            try:
+                i.draw(ctx)
+            except Exception as _ex:
+                _ex.add_note(f'While rendering {i}')
+                raise _ex
+
+        ctx.restore()
+
+    def update(self):
+        self.dirty = False
+
+    def request_redraw(self):
+        if not self.dirty:
+            self.dirty = True
+            _loop.wakeup()
+
+    def on_window_resize(self, width: int, height: int):
+        self._width, self._height = width, height
+        self.on_resize.process(width, height)
+        self.invalidate()
+
+    def dispatch_hover(self, x: float, y: float):
+        self.mouse_x, self.mouse_y = x, y
+
+        self.on_hover.process(x, y)
+
+        given = False
+
+        for _child in reversed(self.flat_children):
+            if not _child.enabled or not _child.hoverable:
+                continue
+
+            if _child.held:
+                _child.on_hold_move.process(x, y)
+
+            is_hovered = _child.hittest(x, y)
+
+            if is_hovered and not given:
+                if not _child.hovered:
+                    _child.hovered = True
+                    _child.on_hover_enter.process(x, y)
+
+                _child.on_hover.process(x, y)
+
+                given = True
+            elif _child.hovered:
+                _child.hovered = False
+                _child.on_hover_exit.process(x, y)
+
+    def dispatch_scroll(self, delta_x: int, delta_y: int):
+        x, y = self.mouse_x, self.mouse_y
+
+        for _child in reversed(self.flat_children):
+            if not _child.enabled or not _child.scroll_enabled:
+                continue
+            if _child.hittest(x, y):
+                if delta_x:
+                    _child.on_horizontal_scroll.process(delta_x, x, y)
+                if delta_y:
+                    _child.on_scroll.process(delta_y, x, y)
+
+    def dispatch_click(self, button: int, action: int, mods: int):
+        x, y = self.mouse_x, self.mouse_y
+
+        if action == 1:
+            self.on_mouse_press.process(button, x, y)
+        else:
+            self.on_mouse_release.process(button, x, y)
+
+        for _child in reversed(self.flat_children):
+            if not _child.enabled  or not _child.clickable:
+                continue
+            if _child.hittest(x, y):
+                if action == 1:  # PRESS
+                    _child.held = True
+                    _child.on_mouse_press.process(button, x, y)
+                else:  # RELEASE
+                    _child.held = False
+                    _child.on_mouse_release.process(button, x, y)
+            elif _child.held:
+                _child.held = False
+                _child.on_mouse_release.process(button, x, y)
+
+    def __repr__(self):
+        return f'<Window id={self.id} dirty={self.dirty} d_place={self.scene_rebuild}>'
+
+    @staticmethod
+    def call_after(cb, sec):
+        _loop.call_at(cb, time.time() + sec)
+
+    @staticmethod
+    def mainloop():
+        return _loop.run()
 
     def rebuild_scene(self):
         if self.scene_rebuilding:
@@ -293,101 +412,3 @@ class AbstractWindow(widget.Widget, abc.ABC):
                 child.set_size(w, h)
 
                 self._rebuild_scene(child)
-
-    def render(self, ctx: skia.Canvas):
-        ctx.clear(self.window_background)
-
-        ctx.save()
-        ctx.scale(self.scale_mod, self.scale_mod)
-
-        for i in self.flat_children:
-            try:
-                i.draw(ctx)
-            except Exception as _ex:
-                _ex.add_note(f'While rendering {i}')
-                raise _ex
-
-        ctx.restore()
-
-    def update(self):
-        self.dirty = False
-
-    def request_redraw(self):
-        if not self.dirty:
-            self.dirty = True
-            _loop.wakeup()
-
-    def on_window_resize(self, width: int, height: int):
-        self._width, self._height = width, height
-        self.on_resize.process(width, height)
-        self.invalidate()
-
-    def dispatch_hover(self, x: float, y: float):
-        self.mouse_x, self.mouse_y = x, y
-
-        self.on_hover.process(x, y)
-
-        given = False
-
-        for _child in reversed(self.flat_children):
-            if not _child.enabled or not _child.hoverable:
-                continue
-
-            if _child.held:
-                _child.on_hold_move.process(x, y)
-
-            is_hovered = _child.hittest(x, y)
-
-            if is_hovered and not given:
-                if not _child.hovered:
-                    _child.hovered = True
-                    _child.on_hover_enter.process(x, y)
-
-                _child.on_hover.process(x, y)
-
-                given = True
-            elif _child.hovered:
-                _child.hovered = False
-                _child.on_hover_exit.process(x, y)
-
-    def dispatch_scroll(self, delta_x: int, delta_y: int):
-        x, y = self.mouse_x, self.mouse_y
-
-        for _child in reversed(self.flat_children):
-            if not _child.enabled or not _child.scroll_enabled:
-                continue
-            if _child.hittest(x, y):
-                if delta_x:
-                    _child.on_horizontal_scroll.process(delta_x, x, y)
-                if delta_y:
-                    _child.on_scroll.process(delta_y, x, y)
-
-    def dispatch_click(self, button: int, action: int, mods: int):
-        x, y = self.mouse_x, self.mouse_y
-
-        if action == 1:
-            self.on_mouse_press.process(button, x, y)
-        else:
-            self.on_mouse_release.process(button, x, y)
-
-        for _child in reversed(self.flat_children):
-            if not _child.enabled  or not _child.clickable:
-                continue
-            if _child.hittest(x, y):
-                if action == 1:  # PRESS
-                    _child.held = True
-                    _child.on_mouse_press.process(button, x, y)
-                else:  # RELEASE
-                    _child.held = False
-                    _child.on_mouse_release.process(button, x, y)
-            elif _child.held:
-                _child.held = False
-                _child.on_mouse_release.process(button, x, y)
-
-    @staticmethod
-    def call_after(cb, sec):
-        _loop.call_at(cb, time.time() + sec)
-
-    @staticmethod
-    def mainloop():
-        return _loop.run()

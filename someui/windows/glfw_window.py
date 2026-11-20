@@ -6,7 +6,7 @@ import traceback
 
 import glfw
 import skia
-from .abstract import AbstractWindow
+from someui.abstract import AbstractWindow
 
 _get_z_attr = operator.attrgetter('z')
 
@@ -79,7 +79,6 @@ class GLFWWindow(AbstractWindow):
         if system == 'Darwin':
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
-            self.scale_mod = 2.0
         else:
             glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_COMPAT_PROFILE)
 
@@ -103,6 +102,7 @@ class GLFWWindow(AbstractWindow):
         )
 
         self._maximized = False
+        self.pending_size = None
 
         glfw.set_window_close_callback(window, self._on_close_callback)
         glfw.set_framebuffer_size_callback(window, self._on_resize)
@@ -111,6 +111,7 @@ class GLFWWindow(AbstractWindow):
         glfw.set_scroll_callback(window, _ignore_first(self._wrap_scroll))
         glfw.set_key_callback(window, _ignore_first(self._process_char))
         glfw.set_window_maximize_callback(window, _ignore_first(self._maximized_proc))
+        glfw.set_window_content_scale_callback(window, _ignore_first(self._resolve_size))
 
         self.mcfg.propagate = False
 
@@ -129,8 +130,18 @@ class GLFWWindow(AbstractWindow):
 
         super().__post_init__()
 
+    def _resolve_size(self, x, y):
+        self.scale_x = x
+        self.scale_y = y
+        self.invalidate()
+
+    @property
     def win32_handle(self) -> int:
         return glfw.get_win32_window(self._window)
+
+    @property
+    def macos_handle(self):
+        return glfw.get_cocoa_window(self._window)
 
     def _maximized_proc(self, val):
         self._maximized = val == 1
@@ -153,6 +164,7 @@ class GLFWWindow(AbstractWindow):
 
                 if self.surface_dirty:
                     self._create_surface()
+                    self.surface_dirty = False
 
                 self.on_animation_frame.process(dt)
 
@@ -189,14 +201,14 @@ class GLFWWindow(AbstractWindow):
         # super_state = bool(mods & glfw.MOD_SUPER)
 
         # Итоговый кортеж со всеми данными
-        event_tuple = (key_str, action_str, shift_state, ctrl_state, alt_state)
+        # event_tuple = (key_str, action_str, shift_state, ctrl_state, alt_state)
 
         # Дальше отправляй этот эвент в свой диспетчер / фокусный инпут
         if action_str == 'press':
             self.on_keyboard_press.process(key_str, shift_state, ctrl_state, alt_state)
         elif action_str == 'release':
             self.on_keyboard_release.process(key_str, shift_state, ctrl_state, alt_state)
-        elif action_str == 'press' or action_str == 'repeat':
+        if action_str == 'press' or action_str == 'repeat':
             self.on_keyboard_write.process(key_str, shift_state, ctrl_state, alt_state)
 
     @property
@@ -243,8 +255,11 @@ class GLFWWindow(AbstractWindow):
         if not self._glfws:
             glfw.terminate()
 
-    def pool(self):
+    def pool_native(self):
         glfw.poll_events()
+        if self.pending_size:
+            self.on_resize.process(*self.pending_size)
+            self.pending_size = None
 
     def _on_close_callback(self, window):
         self.is_running = False
@@ -252,10 +267,8 @@ class GLFWWindow(AbstractWindow):
 
     def _on_resize(self, win, width, height):
         self._width, self._height = width, height
+        self.pending_size = (width, height)
         self._invalidate_surface()
-        self.on_resize.process(width, height)
-        if width % 10 == 0 or height % 10 == 0:
-            self.rebuild_scene()
         self.invalidate_place()
 
     def _invalidate_surface(self):
@@ -287,9 +300,6 @@ class GLFWWindow(AbstractWindow):
 
         if self.surface is None:
             raise RuntimeError(f'Surface is None')
-
-
-from typing import Self
 
 
 class WindowHeaderWidgetMixin:

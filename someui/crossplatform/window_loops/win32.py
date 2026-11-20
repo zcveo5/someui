@@ -72,15 +72,6 @@ def mainloop(windows):
             for window in windows:
                 window.pool()
 
-                if window.children_rebuild:
-                    window.build_children()
-                    window.invalidate()
-                if window.scene_rebuild:
-                    window.rebuild_scene()
-                    window.invalidate()
-                #if window.dirty:
-                #    window.update()
-
             if _call_queue.empty() and not any(w.dirty for w in windows):
                 _reset_event()
 

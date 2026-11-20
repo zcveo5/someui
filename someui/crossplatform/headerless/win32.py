@@ -15,7 +15,6 @@ if env:
 fp = Path(__file__)
 dll = ctypes.CDLL(fp.parent / 'lib' / 'win32-headerless.dll' if not dll_path else dll_path)
 
-
 dll.AttachWindow.argtypes = [wintypes.HWND]
 dll.AttachWindow.restype = wintypes.BOOL
 
@@ -41,7 +40,7 @@ dll.SetMaxiRect.restype = None
 class Window(AbstractProtocol):
     def __init__(self, window):
         super().__init__(window)
-        self.hwnd = window.win32_handle()
+        self.hwnd = window.win32_handle
         self._enabled = False
         if not self._enabled:
             if not dll.AttachWindow(self.hwnd):
