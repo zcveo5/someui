@@ -24,6 +24,8 @@ from Quartz import CAMetalLayer
 from someui.crossplatform.headerless import get as get_headerless
 from someui.abstract import AbstractWindow, _loop
 
+import skia
+
 _KEY_NAMES = {
     49: "SPACE", 36: "ENTER", 53: "ESCAPE", 51: "BACKSPACE", 48: "TAB",
     123: "LEFT", 124: "RIGHT", 125: "DOWN", 126: "UP",
@@ -96,6 +98,9 @@ class MacWindow(AbstractWindow):
     результат копируется в Metal-текстуру и выводится через blit.
     Рендер выполняется в главном потоке из pool_native()."""
 
+    _ENABLED_RENDER_THREAD = False
+
+
     def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', headerless=False):
         super().__init__(width, height, title, headerless)
         _ensure_app()
@@ -148,17 +153,6 @@ class MacWindow(AbstractWindow):
 
         self._update_scale()
         self._on_view_resize()
-
-    def __post_init__(self):
-        # AbstractWindow.__post_init__ стартует отдельный поток; на macOS его не нужно
-        _inst = get_headerless()
-        self.headerless_helper = None
-        if _inst is not None:
-            self.headerless_helper = _inst(self)
-            if self._headerless:
-                self.headerless_helper.enable()
-
-        self.on_ready.process()
 
     def _ensure_texture(self, w, h):
         if self._tex is not None and self._tex_size == (w, h):

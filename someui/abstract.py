@@ -24,6 +24,7 @@ def get_loop() -> AbstractWindowLoop:
 
 class AbstractWindow(widget.Widget, abc.ABC):
     windows: list[AbstractWindow] = []
+    _ENABLED_RENDER_THREAD = True
 
     def __init__(self, width: int = 600, height: int = 400, title: str = 'someui', headerless=False):
         super().__init__(None)
